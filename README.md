@@ -1,102 +1,49 @@
-## Kendi Dokümanların ile Sohbet Et (RAG)
+```markdown
+# 🧠 DocMind-AI: Akıllı Doküman Analiz Asistanı
 
-Streamlit arayüzü ile PDF/DOC/DOCX/TXT yükleyip, ChromaDB + HuggingFace Embeddings + Groq LLM ile doküman tabanlı sohbet edebileceğiniz uçtan uca bir RAG uygulaması.
+DocMind-AI, dokümanlarınızı yükleyip içerikleri hakkında soru sorabileceğiniz, yapay zeka destekli (Groq API & Streamlit) bir analiz aracıdır. RAG (Retrieval-Augmented Generation) yapısını kullanarak dokümanlarınızdan anlamlı bilgiler çıkarır.
 
-### Özellikler
+## 🚀 Özellikler
+- **Hızlı Analiz:** Groq LPU altyapısı sayesinde saniyeler içinde cevap üretir.
+- **RAG Entegrasyonu:** Doküman içeriğini ChromaDB (veya kullandığın vektör veri tabanı) ile indeksler.
+- **Kullanıcı Dostu Arayüz:** Streamlit ile modern ve sade bir web arayüzü.
+- **Gizlilik Odaklı:** API anahtarları yerel ortamda güvenle saklanır.
 
-- **Çoklu dosya yükleme**: `pdf`, `doc`, `docx`, `txt`
-- **Chunking**: LangChain `RecursiveCharacterTextSplitter`
-- **Embedding**: `sentence-transformers/all-MiniLM-L6-v2`
-- **Vector DB**: ChromaDB (persist: `./.rag_chroma`)
-- **LLM**: Groq (varsayılan model: `llama-3.1-8b-instant`)
-- **Kaynak gösterimi**: yanıt altındaki “Kaynaklar” bölümünde
-- **Streaming (bonus)**: API açıkken yanıt token token akar
+## 🛠️ Kurulum
 
----
+Projenizi yerel bilgisayarınızda çalıştırmak için şu adımları izleyin:
 
-## Kurulum
+1. **Depoyu klonlayın:**
+   ```bash
+   git clone [https://github.com/erenece/DocMind-AI.git](https://github.com/erenece/DocMind-AI.git)
+   cd DocMind-AI
+   ```
 
-### 1) Ortam değişkenleri
+2. **Gerekli kütüphaneleri yükleyin:**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-Groq API key’i gereklidir.
+3. **API Anahtarını ayarlayın:**
+   `.streamlit/secrets.toml` dosyasını oluşturun ve içine Groq API anahtarınızı ekleyin:
+   ```toml
+   GROQ_API_KEY = "gsk_..."
+   ```
 
-PowerShell (geçici):
+4. **Uygulamayı çalıştırın:**
+   ```bash
+   streamlit run app.py
+   ```
 
-```powershell
-$env:GROQ_API_KEY="BURAYA_GROQ_KEY"
-# Opsiyonel:
-$env:GROQ_MODEL="llama-3.1-8b-instant"
-```
+## 📂 Proje Yapısı
+- `app.py`: Ana Streamlit arayüzü.
+- `backend.py`: Doküman işleme ve AI mantığı.
+- `.streamlit/`: Uygulama yapılandırması ve yerel şifreler.
+- `requirements.txt`: Gerekli Python kütüphaneleri.
 
-Alternatif: `secrets.toml`
-
-- `./.streamlit/secrets.toml`
-
-```toml
-GROQ_API_KEY="BURAYA_GROQ_KEY"
-GROQ_MODEL="llama-3.1-8b-instant"
-```
-
-### 2) Paketleri kur
-
-```powershell
-& "C:\Users\Ece\AppData\Local\Python\bin\python.exe" -m pip install -r requirements.txt
-```
-
-> Not: İlk çalıştırmada embedding modeli indirileceği için biraz zaman alabilir.
-
----
-
-## Çalıştırma
-
-### A) Önerilen (API tabanlı)
-
-1. API’yi başlat:
-
-```powershell
-$env:GROQ_API_KEY="BURAYA_GROQ_KEY"
-& "C:\Users\Ece\AppData\Local\Python\bin\python.exe" -m uvicorn api:app --host 0.0.0.0 --port 8000
-```
-
-1. Streamlit’i API modunda başlat:
-
-```powershell
-$env:RAG_API_URL="http://localhost:8000"
-& "C:\Users\Ece\AppData\Local\Python\bin\python.exe" -m streamlit run app.py
-```
-
-### B) Tek proses (kolay mod)
-
-API kapalıysa `app.py` otomatik olarak `backend.py`’yi doğrudan import ederek çalışır (streaming yok).
-
-```powershell
-$env:GROQ_API_KEY="BURAYA_GROQ_KEY"
-& "C:\Users\Ece\AppData\Local\Python\bin\python.exe" -m streamlit run app.py
-```
+## 👩‍💻 Geliştirici
+- **Ece** - (https://github.com/erenece)
 
 ---
-
-## DOC desteği notu
-
-`.doc` (legacy) dosyaları için `backend.py` **best-effort** çalışır:
-
-- En stabil yöntem: **LibreOffice (soffice)** ile `.doc` → `.docx` dönüştürme, sonra okuma
-- Eğer LibreOffice yoksa backend “DOC_UNSUPPORTED” hatası döndürür
-
-Eğer `.doc` extraction hatası alırsanız en stabil çözüm: dosyaları `.docx` formatına çevirip yüklemek.
-
----
-
-## Docker (bonus)
-
-`docker-compose.yml` ile API + UI birlikte çalışır.
-
-```bash
-docker compose up --build
+*Bu proje, full-stack geliştirme yolculuğumda AI entegrasyonu üzerine yaptığım bir çalışmadır.*
 ```
-
-Sonra:
-
-- UI: `http://localhost:8501`
-- API: `http://localhost:8000/health`
-
