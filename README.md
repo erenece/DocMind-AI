@@ -54,6 +54,3 @@ Projenizi yerel bilgisayarınızda çalıştırmak için şu adımları izleyin:
 
 
 
-
-
-
