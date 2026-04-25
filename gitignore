@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.streamlit/
+.rag_chroma/
+.env
+venv/
+.DS_Store

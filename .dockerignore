@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.rag_chroma/
+.streamlit/
+.venv/
+.env
+.git/
+.idea/
+.vscode/
+*.log
+

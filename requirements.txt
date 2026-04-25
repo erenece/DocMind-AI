@@ -1,0 +1,20 @@
+streamlit>=1.36.0
+PyPDF2>=3.0.0
+python-docx>=1.1.0
+
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+requests>=2.32.0
+python-multipart>=0.0.9
+
+# LangChain core + integrations
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-text-splitters>=0.3.0
+langchain-community>=0.3.0
+langchain-huggingface>=0.1.0
+langchain-groq>=0.1.0
+
+# Vector store + embeddings
+faiss-cpu>=1.7.4
+sentence-transformers>=3.0.0
