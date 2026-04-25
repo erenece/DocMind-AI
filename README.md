@@ -1,3 +1,5 @@
+https://github.com/user-attachments/assets/79a498df-1716-4761-9800-d296ab624eb0
+
 ```markdown
 # 🧠 DocMind-AI: Akıllı Doküman Analiz Asistanı
 
@@ -43,8 +45,15 @@ Projenizi yerel bilgisayarınızda çalıştırmak için şu adımları izleyin:
 
 ## 👩‍💻 Geliştirici
 - **Ece** - (https://github.com/erenece)
-<img width="2158" height="1310" alt="resim" src="https://github.com/user-attachments/assets/dac2df3d-981e-4013-bab6-a8c46e68f202" />
 
 ---
 *Bu proje, full-stack geliştirme yolculuğumda AI entegrasyonu üzerine yaptığım bir çalışmadır.*
 ```
+<img width="2158" height="1310" alt="resim" src="https://github.com/user-attachments/assets/dac2df3d-981e-4013-bab6-a8c46e68f202" />
+
+
+
+
+
+
+
