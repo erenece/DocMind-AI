@@ -49,7 +49,7 @@ Projenizi yerel bilgisayarınızda çalıştırmak için şu adımları izleyin:
 ---
 *Bu proje, full-stack geliştirme yolculuğumda AI entegrasyonu üzerine yaptığım bir çalışmadır.*
 ```
-<img width="2158" height="1310" alt="resim" src="https://github.com/user-attachments/assets/dac2df3d-981e-4013-bab6-a8c46e68f202" />
+
 
 
 
