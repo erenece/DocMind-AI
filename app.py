@@ -315,6 +315,7 @@ def _resolve_backend() -> tuple[Callable[..., Dict[str, Any]], Callable[..., Dic
 
         return _api_get_ai_response, _api_process_documents, _api_summarize_documents
 
+    backend_import_error = None
     try:
         import backend  # type: ignore
 
@@ -323,14 +324,15 @@ def _resolve_backend() -> tuple[Callable[..., Dict[str, Any]], Callable[..., Dic
         summarize_documents = getattr(backend, "summarize_documents", None)
         if callable(get_ai_response) and callable(process_documents) and callable(summarize_documents):
             return get_ai_response, process_documents, summarize_documents
-    except Exception:
-        pass
+    except Exception as e:
+        backend_import_error = str(e)
 
     def _mock_get_ai_response(user_query: str, *_args: Any, **_kwargs: Any) -> Dict[str, Any]:
         _ = user_query
+        reason = f"\n\nTeknik detay: `{backend_import_error}`" if backend_import_error else ""
         return {
             "ok": True,
-            "answer": "⚠️ Backend bağlantısı kurulamadı (mock mod). `backend.py` dosyanızın aynı dizinde olduğundan ve bağımlılıkların yüklü olduğundan emin olun.",
+            "answer": "⚠️ Backend bağlantısı kurulamadı (mock mod). `backend.py` dosyanızın aynı dizinde olduğundan ve bağımlılıkların yüklü olduğundan emin olun." + reason,
             "sources": [],
         }
 
@@ -649,7 +651,13 @@ def _render_chat(get_ai_response: Callable[..., Dict[str, Any]]) -> None:
                                 sources = json.loads(data)
                             elif ev == "error":
                                 err = json.loads(data)
-                                raise RuntimeError(err.get("message", "Streaming error"))
+                                err_msg = (err.get("message") or "").strip()
+                                err_code = (err.get("code") or "STREAM_ERROR").strip()
+                                err_details = err.get("details")
+                                msg = err_msg if err_msg else f"Streaming hatası ({err_code})"
+                                if err_details:
+                                    msg = f"{msg} | detay: {err_details}"
+                                raise RuntimeError(msg)
                         reply = "".join(answer_parts).strip() or "Yanıt üretilemedi (boş cevap)."
                         result = {
                             "ok": True,
@@ -667,11 +675,30 @@ def _render_chat(get_ai_response: Callable[..., Dict[str, Any]]) -> None:
                             chat_history=st.session_state.messages[-12:],
                         )
                     except Exception as e:
-                        result = {"ok": False, "error": {"code": "BACKEND_EXCEPTION", "message": str(e)}}
+                        err_code = str(getattr(e, "code", "BACKEND_EXCEPTION"))
+                        err_msg = str(getattr(e, "message", "") or str(e)).strip()
+                        err_details = getattr(e, "details", None)
+                        result = {
+                            "ok": False,
+                            "error": {
+                                "code": err_code,
+                                "message": err_msg,
+                                "details": err_details,
+                            },
+                        }
 
                 if not isinstance(result, dict) or not result.get("ok"):
                     err_obj = (result or {}).get("error") if isinstance(result, dict) else None
-                    err_msg = (err_obj or {}).get("message") if isinstance(err_obj, dict) else "Yanıt üretilemedi."
+                    if isinstance(err_obj, dict):
+                        err_code = str(err_obj.get("code") or "UNKNOWN_ERROR").strip()
+                        err_msg = str(err_obj.get("message") or "").strip()
+                        err_details = err_obj.get("details")
+                        if not err_msg:
+                            err_msg = f"Yanıt üretilemedi ({err_code})."
+                        if err_details:
+                            err_msg = f"{err_msg}\n\nDetay: `{err_details}`"
+                    else:
+                        err_msg = "Yanıt üretilemedi (bilinmeyen hata)."
                     reply = f"❌ Hata: {err_msg}"
                 else:
                     reply = result.get("answer") or "Yanıt üretilemedi (boş cevap)."

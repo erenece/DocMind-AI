@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+# Avoid optional TensorFlow import path in transformers/sentence-transformers.
+os.environ.setdefault("USE_TF", "0")
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+
 from docx import Document as DocxDocument
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
@@ -34,21 +38,44 @@ class BackendError(Exception):
             d["details"] = self.details
         return d
 
+    def __str__(self) -> str:
+        if self.details is None:
+            return f"{self.code}: {self.message}"
+        return f"{self.code}: {self.message} | details={self.details}"
+
 
 def _file_ext(filename: str) -> str:
     parts = filename.rsplit(".", 1)
     return parts[-1].lower() if len(parts) == 2 else ""
 
 
-def _sha1(text: str) -> str:
-    return hashlib.sha1(text.encode("utf-8", errors="ignore")).hexdigest()
-
-
 def _ensure_api_key() -> None:
+    if os.getenv("GROQ_API_KEY"):
+        return
+
+    # Fallback: load from local Streamlit secrets when running outside Streamlit process
+    # (e.g., FastAPI API mode).
+    try:
+        import tomllib  # Python 3.11+
+    except Exception:
+        tomllib = None  # type: ignore[assignment]
+
+    if tomllib is not None:
+        try:
+            secrets_path = Path(".streamlit/secrets.toml")
+            if secrets_path.exists():
+                data = tomllib.loads(secrets_path.read_text(encoding="utf-8"))
+                key = str(data.get("GROQ_API_KEY") or "").strip()
+                if key:
+                    os.environ["GROQ_API_KEY"] = key
+                    return
+        except Exception:
+            pass
+
     if not os.getenv("GROQ_API_KEY"):
         raise BackendError(
             code="MISSING_GROQ_API_KEY",
-            message="Groq API key bulunamadı. GROQ_API_KEY ortam değişkenini ayarlayın.",
+            message="Groq API key bulunamadı. GROQ_API_KEY ortam değişkenini ayarlayın veya .streamlit/secrets.toml içine ekleyin.",
         )
 
 
@@ -56,6 +83,8 @@ def _ensure_api_key() -> None:
 _EMBEDDINGS: Optional[HuggingFaceEmbeddings] = None
 _VECTORSTORE: Optional[FAISS] = None
 _INDEX_ID: Optional[str] = None
+_VECTOR_DB_DIR = Path(os.getenv("VECTOR_DB_PATH", ".rag_faiss")).resolve()
+_LATEST_INDEX_FILE = _VECTOR_DB_DIR / "latest_index.txt"
 
 
 def _get_embeddings() -> HuggingFaceEmbeddings:
@@ -73,11 +102,63 @@ def _reset_vectorstore() -> None:
     _INDEX_ID = None
 
 
+def _index_dir(index_id: str) -> Path:
+    return _VECTOR_DB_DIR / index_id
+
+
+def _write_latest_index_id(index_id: str) -> None:
+    _VECTOR_DB_DIR.mkdir(parents=True, exist_ok=True)
+    _LATEST_INDEX_FILE.write_text(index_id, encoding="utf-8")
+
+
+def _read_latest_index_id() -> Optional[str]:
+    if not _LATEST_INDEX_FILE.exists():
+        return None
+    value = _LATEST_INDEX_FILE.read_text(encoding="utf-8").strip()
+    return value or None
+
+
+def _persist_vectorstore(vs: FAISS, index_id: str) -> Path:
+    out_dir = _index_dir(index_id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    vs.save_local(str(out_dir))
+    _write_latest_index_id(index_id)
+    return out_dir
+
+
+def _load_vectorstore(index_id: str) -> FAISS:
+    in_dir = _index_dir(index_id)
+    if not in_dir.exists():
+        raise BackendError(
+            "INDEX_NOT_FOUND",
+            "İstenen vektör indeksi bulunamadı.",
+            {"index_id": index_id, "path": str(in_dir)},
+        )
+    return FAISS.load_local(
+        str(in_dir),
+        _get_embeddings(),
+        allow_dangerous_deserialization=True,
+    )
+
+
+def _compute_index_id(docs: List[Document]) -> str:
+    digest = hashlib.sha1()
+    digest.update(f"doc_count:{len(docs)}|".encode("utf-8"))
+    for d in docs[:128]:
+        meta = d.metadata or {}
+        source = str(meta.get("source", ""))
+        chunk = str(meta.get("chunk", ""))
+        text = (d.page_content or "")[:300]
+        digest.update(f"{source}:{chunk}:".encode("utf-8", errors="ignore"))
+        digest.update(text.encode("utf-8", errors="ignore"))
+    return digest.hexdigest()
+
+
 def _build_vectorstore(docs: List[Document]) -> Tuple[FAISS, str]:
     embeddings = _get_embeddings()
-    # FAISS.from_documents is purely in-memory — no filesystem access at all.
+    # Build in-memory first, then persist on disk.
     vs = FAISS.from_documents(documents=docs, embedding=embeddings)
-    index_id = _sha1(f"faiss:{len(docs)}")
+    index_id = _compute_index_id(docs)
     return vs, index_id
 
 
@@ -253,28 +334,56 @@ def process_documents(uploaded_files: List) -> Dict[str, Any]:
     _VECTORSTORE = vs
     _INDEX_ID = index_id
 
-    return {
+    response: Dict[str, Any] = {
         "ok": True,
         "index_id": index_id,
         "processed_count": len(raw_docs),
         "stats": {
             "chunks": len(chunked),
             "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
-            "vector_store": "FAISS (in-memory)",
+            "vector_store": "FAISS (disk + memory)",
         },
         "errors": errors,
     }
+
+    try:
+        saved_path = _persist_vectorstore(vs, index_id)
+        response["storage"] = {
+            "index_id": index_id,
+            "path": str(saved_path),
+            "persistent": True,
+        }
+    except Exception as e:
+        response["storage"] = {
+            "index_id": index_id,
+            "persistent": False,
+            "warning": f"İndeks diske kaydedilemedi: {e}",
+        }
+
+    return response
 
 
 def _require_vectorstore(index_id: Optional[str] = None) -> Tuple[FAISS, str]:
     global _VECTORSTORE, _INDEX_ID
 
-    if _VECTORSTORE is not None and _INDEX_ID is not None:
+    if _VECTORSTORE is not None and _INDEX_ID is not None and (index_id is None or index_id == _INDEX_ID):
         return _VECTORSTORE, _INDEX_ID
+
+    target_index_id = index_id or _read_latest_index_id()
+    if target_index_id:
+        try:
+            loaded = _load_vectorstore(target_index_id)
+            _VECTORSTORE = loaded
+            _INDEX_ID = target_index_id
+            return loaded, target_index_id
+        except BackendError:
+            raise
+        except Exception as e:
+            raise BackendError("INDEX_LOAD_FAILED", "Vektör indeksi yüklenemedi.", str(e))
 
     raise BackendError(
         "INDEX_NOT_FOUND",
-        "Vektör indeksi bellekte bulunamadı. Lütfen dökümanları tekrar işleyin.",
+        "Vektör indeksi bulunamadı. Lütfen dökümanları tekrar işleyin.",
     )
 
 
