@@ -83,6 +83,31 @@ async def chat(
         return _err(500, "INTERNAL_ERROR", "Beklenmeyen hata", str(e))
 
 
+@app.post("/documents/summary")
+async def summarize_documents(
+    payload: Dict[str, Any],
+    x_session_id: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    _ = x_session_id
+    try:
+        index_id = payload.get("index_id")
+        max_chars = int(payload.get("max_chars") or 12000)
+        result = backend.summarize_documents(index_id=index_id, max_chars=max_chars)
+        if not isinstance(result, dict) or not result.get("ok"):
+            err = (result or {}).get("error") if isinstance(result, dict) else None
+            return _err(
+                400,
+                (err or {}).get("code", "SUMMARY_FAILED"),
+                (err or {}).get("message", "Özetleme hatası"),
+                (err or {}).get("details"),
+            )
+        return JSONResponse(status_code=200, content=result)
+    except backend.BackendError as e:
+        return _err(400, e.code, e.message, e.details)
+    except Exception as e:
+        return _err(500, "INTERNAL_ERROR", "Beklenmeyen hata", str(e))
+
+
 @app.post("/chat/stream")
 async def chat_stream(
     payload: Dict[str, Any],

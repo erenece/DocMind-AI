@@ -278,7 +278,7 @@ hr { border-color: rgba(148,163,184,0.08) !important; margin: .75rem 0 !importan
     )
 
 
-def _resolve_backend() -> tuple[Callable[..., Dict[str, Any]], Callable[..., Dict[str, Any]]]:
+def _resolve_backend() -> tuple[Callable[..., Dict[str, Any]], Callable[..., Dict[str, Any]], Callable[..., Dict[str, Any]]]:
     """
     Backend 'backend.py' içinden get_ai_response / process_documents fonksiyonlarını yükler.
     Import hatası varsa kullanıcıya anlaşılır bir hata döndüren mock fonksiyonlara düşer.
@@ -304,15 +304,25 @@ def _resolve_backend() -> tuple[Callable[..., Dict[str, Any]], Callable[..., Dic
             r = requests.post(f"{api_base}/chat", json=payload, headers=headers, timeout=600)
             return r.json()
 
-        return _api_get_ai_response, _api_process_documents
+        def _api_summarize_documents(*_args: Any, **kwargs: Any) -> Dict[str, Any]:
+            payload = {
+                "index_id": kwargs.get("index_id"),
+                "max_chars": kwargs.get("max_chars", 12000),
+            }
+            headers = {"X-Session-Id": st.session_state.session_id}
+            r = requests.post(f"{api_base}/documents/summary", json=payload, headers=headers, timeout=600)
+            return r.json()
+
+        return _api_get_ai_response, _api_process_documents, _api_summarize_documents
 
     try:
         import backend  # type: ignore
 
         get_ai_response = getattr(backend, "get_ai_response", None)
         process_documents = getattr(backend, "process_documents", None)
-        if callable(get_ai_response) and callable(process_documents):
-            return get_ai_response, process_documents
+        summarize_documents = getattr(backend, "summarize_documents", None)
+        if callable(get_ai_response) and callable(process_documents) and callable(summarize_documents):
+            return get_ai_response, process_documents, summarize_documents
     except Exception:
         pass
 
@@ -328,7 +338,14 @@ def _resolve_backend() -> tuple[Callable[..., Dict[str, Any]], Callable[..., Dic
         _ = uploaded_files
         return {"ok": True, "index_id": "mock", "processed_count": len(uploaded_files or []), "stats": {}, "errors": []}
 
-    return _mock_get_ai_response, _mock_process_documents
+    def _mock_summarize_documents(*_args: Any, **_kwargs: Any) -> Dict[str, Any]:
+        return {
+            "ok": True,
+            "summary": "⚠️ Özetleme backend bağlantısı olmadığı için mock modda çalışıyor.",
+            "sources": [],
+        }
+
+    return _mock_get_ai_response, _mock_process_documents, _mock_summarize_documents
 
 
 def _ensure_state() -> None:
@@ -380,7 +397,10 @@ def _sync_uploaded_docs(uploaded_files: Optional[List]) -> None:
         st.session_state.upload_fingerprint = new_fp
 
 
-def _render_sidebar(process_documents: Callable[..., Dict[str, Any]]) -> None:
+def _render_sidebar(
+    process_documents: Callable[..., Dict[str, Any]],
+    summarize_documents: Callable[..., Dict[str, Any]],
+) -> None:
     with st.sidebar:
         st.markdown(
             """
@@ -486,6 +506,31 @@ def _render_sidebar(process_documents: Callable[..., Dict[str, Any]]) -> None:
             if result.get("errors"):
                 with st.expander("⚠️ Uyarılar"):
                     st.json(result["errors"])
+
+        if st.session_state.docs_ready:
+            summarize_clicked = st.button(
+                "📝 Dökümanları Özetle",
+                use_container_width=True,
+            )
+            if summarize_clicked:
+                with st.status("Özet hazırlanıyor…", expanded=False):
+                    try:
+                        summary_result = summarize_documents(
+                            index_id=st.session_state.index_id,
+                            max_chars=12000,
+                        )
+                    except Exception as e:
+                        summary_result = {"ok": False, "error": {"code": "SUMMARY_EXCEPTION", "message": str(e)}}
+
+                if not isinstance(summary_result, dict) or not summary_result.get("ok"):
+                    err = (summary_result or {}).get("error") if isinstance(summary_result, dict) else None
+                    msg = (err or {}).get("message") if isinstance(err, dict) else "Özet üretilemedi."
+                    st.error(msg, icon="❌")
+                else:
+                    summary_text = summary_result.get("summary") or "Özet üretilemedi (boş cevap)."
+                    st.session_state.messages.append({"role": "assistant", "content": f"## Doküman Özeti\n\n{summary_text}"})
+                    st.success("Özet hazır. Sohbette görüntüleyebilirsiniz.", icon="✅")
+                    st.rerun()
 
         # Sidebar footer
         st.markdown("<div style='height:1.5rem'></div>", unsafe_allow_html=True)
@@ -673,9 +718,9 @@ def main() -> None:
     except Exception:
         pass
 
-    get_ai_response, process_documents = _resolve_backend()
+    get_ai_response, process_documents, summarize_documents = _resolve_backend()
 
-    _render_sidebar(process_documents)
+    _render_sidebar(process_documents, summarize_documents)
     _render_header()
     _maybe_seed_welcome()
     _render_chat(get_ai_response)

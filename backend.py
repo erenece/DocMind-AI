@@ -278,6 +278,102 @@ def _require_vectorstore(index_id: Optional[str] = None) -> Tuple[FAISS, str]:
     )
 
 
+def summarize_documents(
+    *,
+    index_id: Optional[str] = None,
+    max_chars: int = 12000,
+) -> Dict[str, Any]:
+    """Yüklenen dökümanların tamamından kısa, kaynaklı bir özet üretir."""
+    _ensure_api_key()
+
+    vs, active_index_id = _require_vectorstore(index_id)
+    model = os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL)
+
+    doc_dict = getattr(getattr(vs, "docstore", None), "_dict", {}) or {}
+    docs = list(doc_dict.values())
+    if not docs:
+        return {
+            "ok": True,
+            "index_id": active_index_id,
+            "summary": "Özet oluşturmak için işlenmiş döküman bulunamadı.",
+            "sources": [],
+            "meta": {"model": model},
+        }
+
+    context_parts: List[str] = []
+    used_chars = 0
+    sources: List[Dict[str, Any]] = []
+
+    for i, d in enumerate(docs):
+        text = (getattr(d, "page_content", "") or "").strip()
+        if not text:
+            continue
+
+        meta = getattr(d, "metadata", {}) or {}
+        filename = meta.get("source", "doküman")
+        chunk_id = meta.get("chunk")
+
+        snippet = text.replace("\n", " ")
+        snippet = snippet[:220] + ("…" if len(snippet) > 220 else "")
+        sources.append({"filename": filename, "chunk_id": chunk_id, "snippet": snippet})
+
+        remaining = max_chars - used_chars
+        if remaining <= 0:
+            break
+        piece = text[:remaining]
+        context_parts.append(f"[Kaynak: {filename} | chunk={chunk_id}]\n{piece}")
+        used_chars += len(piece)
+
+        if i >= 59:
+            break
+
+    context = "\n\n---\n\n".join(context_parts).strip()
+    if not context:
+        return {
+            "ok": True,
+            "index_id": active_index_id,
+            "summary": "Dökümanlardan anlamlı içerik çıkarılamadı.",
+            "sources": [],
+            "meta": {"model": model},
+        }
+
+    prompt = ChatPromptTemplate.from_messages([
+        (
+            "system",
+            "Sen doküman özetleme asistanısın. Sadece verilen bağlama göre Türkçe, kısa, net ve maddeli özet çıkar. "
+            "Bağlam dışı bilgi üretme.",
+        ),
+        (
+            "human",
+            "Bağlam (context):\n{context}\n\n"
+            "İstenen çıktı formatı:\n"
+            "1) Genel özet (2-4 cümle)\n"
+            "2) Öne çıkan bulgular (3-6 madde)\n"
+            "3) Kritik rakam/tarih/isimler (varsa)\n"
+            "4) Belirsiz kalan noktalar\n\n"
+            "Cevap:",
+        ),
+    ])
+
+    llm = ChatGroq(model=model, temperature=0.2, max_tokens=900)
+    try:
+        msg = llm.invoke(prompt.format_messages(context=context))
+        summary = (getattr(msg, "content", None) or "").strip()
+    except Exception as e:
+        raise BackendError("LLM_FAILED", "Groq özetleme çağrısı başarısız.", str(e))
+
+    if not summary:
+        summary = "Özet üretilemedi (boş yanıt)."
+
+    return {
+        "ok": True,
+        "index_id": active_index_id,
+        "summary": summary,
+        "sources": sources[:12],
+        "meta": {"model": model, "max_chars": max_chars},
+    }
+
+
 def get_ai_response(
     user_query: str,
     *,
